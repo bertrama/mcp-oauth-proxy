@@ -422,6 +422,9 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request, nex
 		proxy := &httputil.ReverseProxy{
 			Director: func(req *http.Request) {
 				req.Header.Del("Authorization")
+				if accessToken, ok := tokenInfo.Props["access_token"].(string); ok && accessToken != "" {
+					req.Header.Set("Authorization", "Bearer "+accessToken)
+				}
 				req.Header.Set("X-Forwarded-Host", req.Host)
 				req.Header.Set("X-Forwarded-Proto", req.URL.Scheme)
 
