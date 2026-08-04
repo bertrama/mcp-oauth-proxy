@@ -15,6 +15,11 @@ import (
 	"github.com/obot-platform/mcp-oauth-proxy/pkg/types"
 )
 
+// refreshReuseGrace is how long a refresh token stays usable after it has been
+// rotated away, so concurrent clients holding the previous token still succeed
+// instead of being locked out by the rotation.
+const refreshReuseGrace = time.Minute
+
 type TokenStore interface {
 	GetClient(clientID string) (*types.ClientInfo, error)
 	StoreToken(token *types.TokenData) error
@@ -262,13 +267,22 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Check if token is revoked
+	// Check if token is revoked. A token that was revoked by rotation moments
+	// ago is still honoured: two holders of the same refresh token (a
+	// background poller racing an interactive call) would otherwise race, the
+	// loser getting a 401 it cannot recover from. Deliberate revocations —
+	// logout, /revoke — have an old revoked_at and are still rejected.
 	if tokenData.Revoked {
-		handlerutils.JSON(w, http.StatusUnauthorized, types.OAuthError{
-			Error:            "invalid_grant",
-			ErrorDescription: "Token has been revoked",
-		})
-		return
+		rotatedRecently := tokenData.RevokedAt != nil &&
+			time.Since(*tokenData.RevokedAt) <= refreshReuseGrace
+
+		if !rotatedRecently {
+			handlerutils.JSON(w, http.StatusUnauthorized, types.OAuthError{
+				Error:            "invalid_grant",
+				ErrorDescription: "Token has been revoked",
+			})
+			return
+		}
 	}
 
 	// Check if refresh token is expired
@@ -303,15 +317,17 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 	accessTokenSecret := encryption.GenerateRandomString(32)
 	accessToken := fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, accessTokenSecret)
 
-	// Generate new refresh token
+	// Generate new refresh token. Keep this in its own variable: reassigning
+	// refreshToken would clobber the incoming token, and the RevokeToken call
+	// below would then revoke the token that was just issued.
 	refreshTokenSecret := encryption.GenerateRandomString(32)
-	refreshToken = fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, refreshTokenSecret)
+	newRefreshToken := fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, refreshTokenSecret)
 	refreshTokenExpiresAt := time.Now().Add(30 * 24 * time.Hour) // 30 days from now
 
 	// Store new token in database (replaces the old one)
 	newTokenData := &types.TokenData{
 		AccessToken:           accessToken,
-		RefreshToken:          refreshToken,
+		RefreshToken:          newRefreshToken,
 		ClientID:              clientID,
 		UserID:                tokenData.UserID,
 		GrantID:               tokenData.GrantID,
@@ -330,7 +346,7 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Revoke the old refresh token
+	// Revoke the old refresh token, which is still the one the client sent.
 	if err := p.db.RevokeToken(refreshToken); err != nil {
 		log.Printf("Failed to revoke old refresh token: %v", err)
 	}
@@ -339,7 +355,7 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    3600,
-		RefreshToken: refreshToken,
+		RefreshToken: newRefreshToken,
 		Scope:        tokenData.Scope,
 	}
 
