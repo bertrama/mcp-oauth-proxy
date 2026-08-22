@@ -250,10 +250,10 @@ func (p *Handler) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Re
 }
 
 func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request, clientID string) {
-	refreshToken := r.FormValue("refresh_token")
+	oldRefreshToken := r.FormValue("refresh_token")
 
 	// Validate refresh token from database
-	tokenData, err := p.db.GetTokenByRefreshToken(refreshToken)
+	tokenData, err := p.db.GetTokenByRefreshToken(oldRefreshToken)
 	if err != nil {
 		handlerutils.JSON(w, http.StatusUnauthorized, types.OAuthError{
 			Error:            "invalid_grant",
@@ -305,13 +305,13 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 
 	// Generate new refresh token
 	refreshTokenSecret := encryption.GenerateRandomString(32)
-	refreshToken = fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, refreshTokenSecret)
+	newRefreshToken := fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, refreshTokenSecret)
 	refreshTokenExpiresAt := time.Now().Add(30 * 24 * time.Hour) // 30 days from now
 
 	// Store new token in database (replaces the old one)
 	newTokenData := &types.TokenData{
 		AccessToken:           accessToken,
-		RefreshToken:          refreshToken,
+		RefreshToken:          newRefreshToken,
 		ClientID:              clientID,
 		UserID:                tokenData.UserID,
 		GrantID:               tokenData.GrantID,
@@ -331,7 +331,7 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 	}
 
 	// Revoke the old refresh token
-	if err := p.db.RevokeToken(refreshToken); err != nil {
+	if err := p.db.RevokeToken(oldRefreshToken); err != nil {
 		log.Printf("Failed to revoke old refresh token: %v", err)
 	}
 
@@ -339,7 +339,7 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    3600,
-		RefreshToken: refreshToken,
+		RefreshToken: newRefreshToken,
 		Scope:        tokenData.Scope,
 	}
 
