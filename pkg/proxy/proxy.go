@@ -423,7 +423,26 @@ func (p *OAuthProxy) mcpProxyHandler(w http.ResponseWriter, r *http.Request, nex
 			Director: func(req *http.Request) {
 				req.Header.Del("Authorization")
 				req.Header.Set("X-Forwarded-Host", req.Host)
-				req.Header.Set("X-Forwarded-Proto", req.URL.Scheme)
+				// req.URL.Scheme is always empty here: req is the inbound
+				// server-side request, and Go's net/http never populates
+				// URL.Scheme for those (it lives on req.TLS instead). The
+				// original `req.Header.Set("X-Forwarded-Proto", req.URL.Scheme)`
+				// therefore stamped an empty X-Forwarded-Proto on every
+				// forwarded request; Cloud Run's frontend (and likely other
+				// edge proxies) reject requests bearing an empty
+				// X-Forwarded-Proto with a bodiless 404 before they ever
+				// reach the upstream MCP server. Prefer an inbound
+				// X-Forwarded-Proto (this proxy may itself be behind
+				// another proxy/LB), then fall back to r.TLS.
+				proto := r.Header.Get("X-Forwarded-Proto")
+				if proto == "" {
+					if r.TLS != nil {
+						proto = "https"
+					} else {
+						proto = "http"
+					}
+				}
+				req.Header.Set("X-Forwarded-Proto", proto)
 
 				newURL, _ := url.Parse(targetURL)
 				req.URL.Scheme = newURL.Scheme
