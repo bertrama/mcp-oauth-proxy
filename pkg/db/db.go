@@ -22,7 +22,7 @@ type Store struct {
 	dbType string // "postgres" or "sqlite"
 }
 
-// New creates a new database connection and sets up the schema
+// New opens the store and migrates the legacy database schema if necessary.
 func New(dsn string) (*Store, error) {
 	var gormDB *gorm.DB
 	var dbType string
@@ -43,7 +43,7 @@ func New(dsn string) (*Store, error) {
 
 		// Use local SQLite database
 		sqlitePath := filepath.Join(dataDir, "oauth_proxy.db")
-		gormDB, err = gorm.Open(sqlite.Open(sqlitePath), gormConfig)
+		gormDB, err = gorm.Open(sqlite.Open(sqliteMigrationDSN(sqlitePath)), gormConfig)
 		dbType = "sqlite"
 	} else {
 		// Check if it's a PostgreSQL DSN
@@ -52,7 +52,7 @@ func New(dsn string) (*Store, error) {
 			dbType = "postgres"
 		} else {
 			// Assume SQLite file path
-			gormDB, err = gorm.Open(sqlite.Open(dsn), gormConfig)
+			gormDB, err = gorm.Open(sqlite.Open(sqliteMigrationDSN(dsn)), gormConfig)
 			dbType = "sqlite"
 		}
 	}
@@ -63,8 +63,8 @@ func New(dsn string) (*Store, error) {
 
 	database := &Store{db: gormDB, dbType: dbType}
 
-	// Setup schema using GORM AutoMigrate
-	if err := database.setupSchema(); err != nil {
+	if err := database.migrate(); err != nil {
+		_ = database.Close()
 		return nil, fmt.Errorf("failed to setup schema: %w", err)
 	}
 
@@ -387,4 +387,13 @@ func (d *Store) Close() error {
 func GenerateCodeChallenge(codeVerifier string) string {
 	hash := sha256.Sum256([]byte(codeVerifier))
 	return base64.RawURLEncoding.EncodeToString(hash[:])
+}
+
+// Acquire the SQLite write lock at transaction start, before migration reads.
+// Put this option first so an existing _txlock option cannot weaken the lock.
+func sqliteMigrationDSN(dsn string) string {
+	if strings.Contains(dsn, "?") {
+		return strings.Replace(dsn, "?", "?_txlock=immediate&", 1)
+	}
+	return dsn + "?_txlock=immediate"
 }
