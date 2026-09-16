@@ -119,14 +119,29 @@ func (p *GenericProvider) GetAuthorizationURLWithPKCE(clientID, redirectURI, sco
 
 	o := p.buildOAuth2Config(authURL, clientID, "", redirectURI, scope)
 
-	opts := []oauth2.AuthCodeOption{
-		oauth2.AccessTypeOffline,
-		oauth2.ApprovalForce,
+	opts := []oauth2.AuthCodeOption{oauth2.AccessTypeOffline}
+	if prompt := authorizationPrompt(authURL); prompt != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("prompt", prompt))
 	}
 	if codeChallenge != "" {
 		opts = append(opts, oauth2.S256ChallengeOption(codeChallenge))
 	}
 	return o.AuthCodeURL(state, opts...)
+}
+
+func authorizationPrompt(authURL string) string {
+	u, err := url.Parse(authURL)
+	if err != nil {
+		return ""
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "accounts.google.com":
+		return "consent"
+	case "login.microsoftonline.com":
+		return "select_account"
+	default:
+		return ""
+	}
 }
 
 // any exchanges authorization code for tokens
