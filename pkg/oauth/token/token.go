@@ -305,13 +305,13 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 
 	// Generate new refresh token
 	refreshTokenSecret := encryption.GenerateRandomString(32)
-	refreshToken = fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, refreshTokenSecret)
+	newRefreshToken := fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, refreshTokenSecret)
 	refreshTokenExpiresAt := time.Now().Add(30 * 24 * time.Hour) // 30 days from now
 
 	// Store new token in database (replaces the old one)
 	newTokenData := &types.TokenData{
 		AccessToken:           accessToken,
-		RefreshToken:          refreshToken,
+		RefreshToken:          newRefreshToken,
 		ClientID:              clientID,
 		UserID:                tokenData.UserID,
 		GrantID:               tokenData.GrantID,
@@ -339,7 +339,7 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    3600,
-		RefreshToken: refreshToken,
+		RefreshToken: newRefreshToken,
 		Scope:        tokenData.Scope,
 	}
 
