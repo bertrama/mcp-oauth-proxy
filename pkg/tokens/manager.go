@@ -25,10 +25,15 @@ type TokenManager struct {
 	apiKeyValidator  *APIKeyValidator
 }
 
+// AccessTokenTTL is how long an access token is valid, and how far its expiry
+// is pushed out each time it is renewed in place.
+const AccessTokenTTL = time.Hour
+
 // Database interface for token operations
 type Database interface {
 	GetToken(accessToken string) (*types.TokenData, error)
 	GetGrant(grantID, userID string) (*types.Grant, error)
+	ExtendTokenExpiry(accessToken string, expiresAt time.Time) error
 }
 
 // NewTokenManager creates a new token manager
@@ -126,9 +131,19 @@ func (tm *TokenManager) validateAccessToken(tokenString string) (*TokenInfo, err
 		return nil, fmt.Errorf("token has been revoked")
 	}
 
-	// Check if token is expired
+	// An expired access token is renewed in place rather than rejected, so a
+	// bearer client is never forced back through authorization while its grant
+	// is still good. The real session lifetime is refresh_token_expires_at.
 	if time.Now().After(tokenData.ExpiresAt) {
-		return nil, fmt.Errorf("token has expired")
+		if time.Now().After(tokenData.RefreshTokenExpiresAt) {
+			return nil, fmt.Errorf("token has expired")
+		}
+
+		newExpiresAt := time.Now().Add(AccessTokenTTL)
+		if err := tm.db.ExtendTokenExpiry(tokenString, newExpiresAt); err != nil {
+			return nil, fmt.Errorf("token has expired: %w", err)
+		}
+		tokenData.ExpiresAt = newExpiresAt
 	}
 
 	// Get the grant to access props

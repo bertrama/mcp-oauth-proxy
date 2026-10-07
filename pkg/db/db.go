@@ -239,6 +239,25 @@ func (d *Store) GetToken(accessToken string) (*types.TokenData, error) {
 	return &data, nil
 }
 
+// ExtendTokenExpiry pushes out the expiry of a live access token. Used to renew
+// an expired token in place instead of forcing the client to re-authorize.
+// Revoked tokens are deliberately not matched, so revocation stays final.
+func (d *Store) ExtendTokenExpiry(accessToken string, expiresAt time.Time) error {
+	hashedAccessToken := hashToken(accessToken)
+
+	result := d.db.Model(&types.TokenData{}).
+		Where("access_token = ? AND revoked = ?", hashedAccessToken, false).
+		Update("expires_at", expiresAt)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("token not found or revoked")
+	}
+
+	return nil
+}
+
 // GetTokenByRefreshToken retrieves a token by refresh token
 func (d *Store) GetTokenByRefreshToken(refreshToken string) (*types.TokenData, error) {
 	// Hash the refresh token for lookup
