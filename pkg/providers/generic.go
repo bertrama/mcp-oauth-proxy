@@ -50,6 +50,7 @@ func (p *GenericProvider) discoverEndpoints() error {
 		fmt.Sprintf("%s/.well-known/oauth-authorization-server", strings.TrimSuffix(parsedURL.Path, "/")),
 		"/.well-known/openid-configuration" + parsedURL.Path,
 		fmt.Sprintf("%s/.well-known/openid-configuration", strings.TrimSuffix(parsedURL.Path, "/")),
+		parsedURL.Path,
 	}
 
 	for _, path := range wellKnownPaths {
