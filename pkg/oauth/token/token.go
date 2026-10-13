@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/tokenttl"
 	"log"
 	"net/http"
 	"slices"
@@ -251,6 +252,10 @@ func (p *Handler) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Re
 
 func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request, clientID string) {
 	refreshToken := r.FormValue("refresh_token")
+	// Kept apart from refreshToken below, which is reassigned to the NEW token:
+	// the revoke at the end must retire the one that was just spent, not the
+	// one we are about to hand out.
+	spentRefreshToken := refreshToken
 
 	// Validate refresh token from database
 	tokenData, err := p.db.GetTokenByRefreshToken(refreshToken)
@@ -306,7 +311,7 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 	// Generate new refresh token
 	refreshTokenSecret := encryption.GenerateRandomString(32)
 	refreshToken = fmt.Sprintf("%s:%s:%s", tokenData.UserID, tokenData.GrantID, refreshTokenSecret)
-	refreshTokenExpiresAt := time.Now().Add(30 * 24 * time.Hour) // 30 days from now
+	refreshTokenExpiresAt := time.Now().Add(tokenttl.Refresh())
 
 	// Store new token in database (replaces the old one)
 	newTokenData := &types.TokenData{
@@ -331,7 +336,7 @@ func (p *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 	}
 
 	// Revoke the old refresh token
-	if err := p.db.RevokeToken(refreshToken); err != nil {
+	if err := p.db.RevokeToken(spentRefreshToken); err != nil {
 		log.Printf("Failed to revoke old refresh token: %v", err)
 	}
 

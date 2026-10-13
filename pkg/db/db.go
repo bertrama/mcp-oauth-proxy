@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/tokenttl"
 	"os"
 	"path/filepath"
 	"strings"
@@ -208,7 +209,7 @@ func (d *Store) StoreToken(data *types.TokenData) error {
 
 	// Set refresh token expiration to 30 days from now if not already set
 	if data.RefreshTokenExpiresAt.IsZero() {
-		data.RefreshTokenExpiresAt = time.Now().Add(30 * 24 * time.Hour)
+		data.RefreshTokenExpiresAt = time.Now().Add(tokenttl.Refresh())
 	}
 
 	tokenData := &types.TokenData{

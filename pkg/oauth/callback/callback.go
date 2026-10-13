@@ -3,6 +3,7 @@ package callback
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/tokenttl"
 	"log"
 	"net/http"
 	"net/url"
@@ -243,7 +244,7 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 		Props:               props,
 		CreatedAt:           now,
-		ExpiresAt:           now + 3600*24*30, // 30 days to expire for grant, same as refresh token
+		ExpiresAt:           now + int64(tokenttl.Refresh().Seconds()), // same lifetime as the refresh token
 		CodeChallenge:       authReq.CodeChallenge,
 		CodeChallengeMethod: authReq.CodeChallengeMethod,
 	}
@@ -299,8 +300,8 @@ func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			UserID:                userInfo.ID,
 			GrantID:               grantID,
 			Scope:                 authReq.Scope,
-			ExpiresAt:             time.Now().Add(time.Hour),        // 1 hour for access token
-			RefreshTokenExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days for refresh token
+			ExpiresAt:             time.Now().Add(time.Hour),          // 1 hour for access token
+			RefreshTokenExpiresAt: time.Now().Add(tokenttl.Refresh()), // see tokenttl
 			CreatedAt:             time.Now(),
 			Revoked:               false,
 		}

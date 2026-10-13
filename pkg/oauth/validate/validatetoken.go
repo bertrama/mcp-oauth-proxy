@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"github.com/obot-platform/mcp-oauth-proxy/pkg/tokenttl"
 	"net/http"
 	"slices"
 	"strings"
@@ -195,8 +196,8 @@ func (p *TokenValidator) refreshAccessToken(w http.ResponseWriter, r *http.Reque
 		UserID:                tokenData.UserID,
 		GrantID:               tokenData.GrantID,
 		Scope:                 tokenData.Scope,
-		ExpiresAt:             time.Now().Add(time.Hour),           // 1 hour
-		RefreshTokenExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
+		ExpiresAt:             time.Now().Add(time.Hour),          // 1 hour
+		RefreshTokenExpiresAt: time.Now().Add(tokenttl.Refresh()), // see tokenttl
 		CreatedAt:             time.Now(),
 		Revoked:               false,
 	}
@@ -234,7 +235,7 @@ func (p *TokenValidator) refreshAccessToken(w http.ResponseWriter, r *http.Reque
 		Name:     p.refreshTokenCookieName,
 		Value:    encryptedRefreshToken,
 		Path:     "/",
-		MaxAge:   30 * 24 * 3600,
+		MaxAge:   int(tokenttl.Refresh().Seconds()),
 		HttpOnly: true,
 		Secure:   isSecure,
 		SameSite: http.SameSiteLaxMode,
